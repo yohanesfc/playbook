@@ -1,23 +1,70 @@
 ---
 - name: Simple server setup
   hosts: all
-  gather_facts: no
+  gather_facts: no         # we'll gather only what we need, without sudo
+  vars:
+    basic_packages:
+      - htop
+      - curl
+      - wget
+
+  pre_tasks:
+    - name: Gather minimal os_family fact (no sudo)
+      ansible.builtin.setup:
+        filter: ansible_os_family
+      become: false
+      failed_when: false
+
+    - name: Fallback detect os_family from /etc/os-release (no sudo)
+      ansible.builtin.shell: |
+        awk -F= '/^ID_LIKE=|^ID=/{gsub("\"",""); print tolower($2)}' /etc/os-release | head -1
+      args:
+        executable: /bin/sh
+      register: os_like
+      changed_when: false
+      become: false
+      when: ansible_facts['os_family'] is not defined
+
+    - name: Normalize os_family
+      ansible.builtin.set_fact:
+        os_family: >-
+          {{ ansible_facts['os_family']
+             | default(
+                 'RedHat' if ('rhel' in os_like.stdout or 'centos' in os_like.stdout or 'fedora' in os_like.stdout)
+                 else 'Debian'
+               )
+          }}
+
   tasks:
-    - name: Update package cache
-      apt:
+    - name: Update package cache (Debian/Ubuntu)
+      ansible.builtin.apt:
         update_cache: yes
-      when: ansible_os_family == "Debian"
-    
-    - name: Install basic packages
-      package:
-        name:
-          - htop
-          - curl
-          - wget
+      when: os_family == 'Debian'
+      become: true
+
+    - name: Update package metadata (RHEL/CentOS/Fedora)
+      ansible.builtin.dnf:
+        update_cache: yes
+      when: os_family == 'RedHat'
+      become: true
+
+    - name: Install basic packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "{{ basic_packages }}"
         state: present
-    
+      when: os_family == 'Debian'
+      become: true
+
+    - name: Install basic packages (RHEL/CentOS/Fedora)
+      ansible.builtin.dnf:
+        name: "{{ basic_packages }}"
+        state: present
+      when: os_family == 'RedHat'
+      become: true
+
     - name: Create test file
-      file:
+      ansible.builtin.file:
         path: /tmp/awx-test.txt
         state: touch
         mode: '0644'
+      become: true
