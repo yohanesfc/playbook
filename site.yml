@@ -1,12 +1,9 @@
 ---
 - name: Simple server setup
   hosts: all
-  gather_facts: no         # we'll gather only what we need, without sudo
+  gather_facts: no
   vars:
-    basic_packages:
-      - htop
-      - curl
-      - wget
+    basic_packages: [htop, curl, wget]
 
   pre_tasks:
     - name: Gather minimal os_family fact (no sudo)
@@ -23,17 +20,32 @@
       register: os_like
       changed_when: false
       become: false
-      when: ansible_facts['os_family'] is not defined
+      when: ansible_facts.get('os_family') is not defined
 
-    - name: Normalize os_family
+    # Prefer setup() fact when present
+    - name: Normalize os_family from facts
+      ansible.builtin.set_fact:
+        os_family: "{{ ansible_facts['os_family'] }}"
+      when: ansible_facts.get('os_family') is defined
+
+    # Otherwise derive from /etc/os-release
+    - name: Normalize os_family from /etc/os-release
       ansible.builtin.set_fact:
         os_family: >-
-          {{ ansible_facts['os_family']
-             | default(
-                 'RedHat' if ('rhel' in os_like.stdout or 'centos' in os_like.stdout or 'fedora' in os_like.stdout)
-                 else 'Debian'
-               )
-          }}
+          {{ 'RedHat'
+             if (os_like is defined and (os_like.stdout | default('')) is search('rhel|centos|fedora'))
+             else 'Debian' }}
+      when: os_family is not defined
+
+    # Final safety default
+    - name: Ensure os_family has a value
+      ansible.builtin.set_fact:
+        os_family: "{{ os_family | default('Debian') }}"
+      when: os_family is not defined
+
+    - name: Debug detected os_family
+      ansible.builtin.debug:
+        msg: "Detected os_family = {{ os_family }}"
 
   tasks:
     - name: Update package cache (Debian/Ubuntu)
