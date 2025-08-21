@@ -1,6 +1,7 @@
 ---
 - name: Simple server setup
   hosts: all
+  gather_facts: no
   tasks:
     - name: Update package cache
       apt:
