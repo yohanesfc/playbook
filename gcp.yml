@@ -1,0 +1,43 @@
+---
+- name: Create persistent file on GCP Server
+  hosts: GCP
+  gather_facts: yes
+  tasks:
+    - name: Create file on GCP Server
+      copy:
+        content: |
+          AWX Success! File created persistently.
+          Created at: {{ ansible_date_time.iso8601 }}
+          Target Host: {{ inventory_hostname }}
+          AWX Job executed from: {{ ansible_hostname | default('AWX') }}
+        dest: /tmp/awx-persistent-success.txt
+        mode: '0644'
+
+    - name: Verify file was created
+      stat:
+        path: /tmp/awx-persistent-success.txt
+      register: file_status
+
+    - name: Display file information
+      debug:
+        msg: 
+          - "File exists: {{ file_status.stat.exists }}"
+          - "File size: {{ file_status.stat.size }} bytes"
+          - "File path: /tmp/awx-persistent-success.txt"
+          - "File permissions: {{ file_status.stat.mode }}"
+
+    - name: Show file content
+      command: cat /tmp/awx-persistent-success.txt
+      register: file_content
+
+    - name: Display file content
+      debug:
+        msg: "{{ file_content.stdout_lines }}"
+
+    - name: List file details
+      command: ls -la /tmp/awx-persistent-success.txt
+      register: file_details
+
+    - name: Show file listing
+      debug:
+        msg: "{{ file_details.stdout }}"
