@@ -1,31 +1,26 @@
 ---
-- name: Basic AWX Test
-  hosts: all
-  gather_facts: yes
+- name: Test with persistent proof
+  hosts: localhost
+  gather_facts: no
   tasks:
-    - name: Check current directory
-      command: pwd
-      register: current_dir
-    
-    - name: Show current directory
-      debug:
-        msg: "Current directory: {{ current_dir.stdout }}"
-    
-    - name: List files in /tmp
-      command: ls -la /tmp
-      register: tmp_files
-    
-    - name: Show tmp files
-      debug:
-        msg: "{{ tmp_files.stdout_lines }}"
-    
-    - name: Create file in /tmp (no sudo needed)
-      file:
-        path: /tmp/awx-success.txt
-        state: touch
-        mode: '0644'
-    
-    - name: Write content to file
+    - name: Create file in /tmp
       copy:
-        content: "AWX Test Successful!\nTimestamp: {{ ansible_date_time.iso8601 }}"
+        content: "AWX Success! Created at {{ ansible_date_time.iso8601 }}"
         dest: /tmp/awx-success.txt
+
+    - name: Show file was created
+      command: cat /tmp/awx-success.txt
+      register: file_content
+
+    - name: Display file content in AWX logs
+      debug:
+        msg: "File content: {{ file_content.stdout }}"
+
+    - name: Verify file exists
+      stat:
+        path: /tmp/awx-success.txt
+      register: file_stat
+
+    - name: Show file stats
+      debug:
+        msg: "File exists: {{ file_stat.stat.exists }}, Size: {{ file_stat.stat.size | default('N/A') }}"
