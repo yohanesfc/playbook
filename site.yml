@@ -1,11 +1,15 @@
 ---
-- name: Test with persistent proof
+- name: Test with persistent proof (no facts)
   hosts: localhost
   gather_facts: no
   tasks:
+    - name: Get current timestamp
+      command: date '+%Y-%m-%d %H:%M:%S'
+      register: current_time
+
     - name: Create file in /tmp
       copy:
-        content: "AWX Success! Created at {{ ansible_date_time.iso8601 }}"
+        content: "AWX Success! Created at {{ current_time.stdout }}"
         dest: /tmp/awx-success.txt
 
     - name: Show file was created
@@ -24,3 +28,11 @@
     - name: Show file stats
       debug:
         msg: "File exists: {{ file_stat.stat.exists }}, Size: {{ file_stat.stat.size | default('N/A') }}"
+
+    - name: List /tmp contents to confirm
+      command: ls -la /tmp/awx-success.txt
+      register: file_listing
+
+    - name: Show file listing
+      debug:
+        msg: "{{ file_listing.stdout }}"
