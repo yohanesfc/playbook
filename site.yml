@@ -1,105 +1,31 @@
 ---
-- name: Simple server setup
+- name: Basic AWX Test
   hosts: all
-  gather_facts: no
-  vars:
-    basic_packages: [htop, curl, wget]
-
-  pre_tasks:
-    - name: Gather minimal os_family fact (no sudo)
-      ansible.builtin.setup:
-        filter: ansible_os_family
-      become: false
-      failed_when: false
-
-    - name: Detect if running inside a container
-      ansible.builtin.stat:
-        path: /.dockerenv
-      register: in_container
-      changed_when: false
-
-    - name: Normalize os_family (prefer setup fact)
-      ansible.builtin.set_fact:
-        os_family: "{{ ansible_facts.get('os_family', 'Debian') }}"
-
-    - name: Debug detected os_family
-      ansible.builtin.debug:
-        msg: "Detected os_family = {{ os_family }} (container={{ in_container.stat.exists }})"
-
+  gather_facts: yes
   tasks:
-    - name: Skip package tasks when inside container
-      ansible.builtin.debug:
-        msg: "Skipping package actions because we're inside a container."
-      when: in_container.stat.exists
-      tags: ['skip_container']
-
-    - block:
-        # ---- RHEL family branch ----
-        - name: Determine available package manager
-          ansible.builtin.shell: |
-            set -o pipefail
-            if command -v dnf5 >/dev/null 2>&1; then echo dnf5;
-            elif command -v dnf >/dev/null 2>&1; then echo dnf4;
-            elif command -v yum >/dev/null 2>&1; then echo yum;
-            else echo none; fi
-          args: { executable: /bin/bash }
-          register: pkg_backend
-          changed_when: false
-          become: false
-
-        - name: Fail early if no supported package manager found
-          ansible.builtin.fail:
-            msg: "No supported package manager (dnf5/dnf/yum) found on this host."
-          when: pkg_backend.stdout == 'none'
-
-        - name: Update package metadata (RHEL/CentOS/Fedora via dnf5)
-          ansible.builtin.dnf:
-            update_cache: yes
-            use_backend: dnf5
-          when: pkg_backend.stdout == 'dnf5'
-          become: true
-
-        - name: Update package metadata (RHEL/CentOS/Fedora via dnf4)
-          ansible.builtin.dnf:
-            update_cache: yes
-            use_backend: dnf4
-          when: pkg_backend.stdout == 'dnf4'
-          become: true
-
-        - name: Update package metadata (RHEL/CentOS/Fedora via yum)
-          ansible.builtin.yum:
-            update_cache: yes
-          when: pkg_backend.stdout == 'yum'
-          become: true
-
-        - name: Install basic packages (RHEL/CentOS/Fedora)
-          ansible.builtin.package:
-            name: "{{ basic_packages }}"
-            state: present
-          become: true
-      when:
-        - not in_container.stat.exists
-        - os_family == 'RedHat'
-
-    - block:
-        # ---- Debian family branch ----
-        - name: Update package cache (Debian/Ubuntu)
-          ansible.builtin.apt:
-            update_cache: yes
-          become: true
-
-        - name: Install basic packages (Debian/Ubuntu)
-          ansible.builtin.apt:
-            name: "{{ basic_packages }}"
-            state: present
-          become: true
-      when:
-        - not in_container.stat.exists
-        - os_family == 'Debian'
-
-    - name: Create test file (works anywhere)
-      ansible.builtin.file:
-        path: /tmp/awx-test.txt
+    - name: Check current directory
+      command: pwd
+      register: current_dir
+    
+    - name: Show current directory
+      debug:
+        msg: "Current directory: {{ current_dir.stdout }}"
+    
+    - name: List files in /tmp
+      command: ls -la /tmp
+      register: tmp_files
+    
+    - name: Show tmp files
+      debug:
+        msg: "{{ tmp_files.stdout_lines }}"
+    
+    - name: Create file in /tmp (no sudo needed)
+      file:
+        path: /tmp/awx-success.txt
         state: touch
         mode: '0644'
-      become: true
+    
+    - name: Write content to file
+      copy:
+        content: "AWX Test Successful!\nTimestamp: {{ ansible_date_time.iso8601 }}"
+        dest: /tmp/awx-success.txt
