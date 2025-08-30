@@ -1,6 +1,6 @@
 ---
 - name: Install Docker Telemetry Stack (Simple Version)
-  hosts: telemetry_server
+  hosts: all
   become: yes
   gather_facts: yes
   
