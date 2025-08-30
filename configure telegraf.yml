@@ -1,0 +1,56 @@
+---
+- name: Configure Telegraf for Cisco Telemetry
+  hosts: telemetry_servers
+  become: yes
+  vars:
+    influxdb_host: "influxdb"
+    influxdb_port: 8086
+    influxdb_database: "cisco_telemetry"
+    influxdb_username: "admin"
+    influxdb_password: "admin123"
+    telegraf_listen_port: 57344
+    
+  tasks:
+    - name: Create telegraf configuration directory
+      file:
+        path: /opt/telemetry
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Telegraf configuration
+      template:
+        src: telegraf.conf.j2
+        dest: /opt/telemetry/telegraf.conf
+        backup: yes
+      notify: restart telegraf
+
+    - name: Deploy aliases configuration
+      copy:
+        content: |
+          {
+            "Cisco-IOS-XR-ipv4-bgp-oper:bgp": "bgp",
+            "Cisco-IOS-XR-ipv4-bgp-oper:bgp/instances": "bgp_instances",
+            "Cisco-IOS-XR-ipv4-bgp-oper:bgp/instances/instance": "bgp_instance"
+          }
+        dest: /opt/telemetry/aliases.json
+      notify: restart telegraf
+
+    - name: Ensure Telegraf container is running
+      docker_container:
+        name: telegraf
+        image: telegraf:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "{{ telegraf_listen_port }}:{{ telegraf_listen_port }}"
+        volumes:
+          - /opt/telemetry/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+          - /opt/telemetry/aliases.json:/opt/telemetry/aliases.json:ro
+        networks:
+          - name: telemetry_network
+
+  handlers:
+    - name: restart telegraf
+      docker_container:
+        name: telegraf
+        restart: yes
