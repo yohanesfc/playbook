@@ -1,0 +1,40 @@
+[agent]
+  interval = "10s"
+  round_interval = true
+  metric_batch_size = 1000
+  metric_buffer_limit = 10000
+  collection_jitter = "0s"
+  flush_interval = "10s"
+  flush_jitter = "0s"
+  precision = ""
+  hostname = ""
+  omit_hostname = false
+
+[[outputs.influxdb]]
+  urls = ["http://{{ influxdb_host | default('influxdb') }}:{{ influxdb_port | default('8086') }}"]
+  database = "{{ influxdb_database | default('cisco_telemetry') }}"
+  username = "{{ influxdb_username | default('admin') }}"
+  password = "{{ influxdb_password | default('admin123') }}"
+  retention_policy = ""
+  write_consistency = "any"
+  timeout = "5s"
+
+[[inputs.cisco_telemetry_mdt]]
+  transport = "tcp"
+  service_address = ":{{ telegraf_listen_port | default('57344') }}"
+  
+{% if use_aliases | default(true) %}
+  aliases = "/opt/telemetry/aliases.json"
+{% endif %}
+
+# System monitoring
+[[inputs.cpu]]
+  percpu = true
+  totalcpu = true
+
+[[inputs.disk]]
+  ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
+
+[[inputs.mem]]
+
+[[inputs.system]]
