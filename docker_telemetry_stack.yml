@@ -1,0 +1,224 @@
+---
+- name: Install Telemetry Stack using Docker
+  hosts: telemetry_server
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    # Install Docker
+    - name: Install Docker (Ubuntu/Debian)
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # Create docker-compose for TIG stack
+    - name: Create telemetry stack directory
+      file:
+        path: /opt/telemetry-stack
+        state: directory
+        mode: '0755'
+
+    - name: Create docker-compose.yml for TIG stack
+      copy:
+        content: |
+          version: '3.8'
+          
+          services:
+            influxdb:
+              image: influxdb:1.8
+              container_name: influxdb
+              restart: unless-stopped
+              ports:
+                - "8086:8086"
+              environment:
+                - INFLUXDB_DB=cisco_telemetry
+                - INFLUXDB_ADMIN_USER=admin
+                - INFLUXDB_ADMIN_PASSWORD=admin123
+                - INFLUXDB_USER=telegraf
+                - INFLUXDB_USER_PASSWORD=telegraf123
+              volumes:
+                - influxdb_data:/var/lib/influxdb
+                - ./influxdb.conf:/etc/influxdb/influxdb.conf:ro
+              networks:
+                - telemetry
+          
+            telegraf:
+              image: telegraf:latest
+              container_name: telegraf
+              restart: unless-stopped
+              ports:
+                - "57344:57344"  # Telemetry collector port
+              volumes:
+                - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+              depends_on:
+                - influxdb
+              networks:
+                - telemetry
+          
+            grafana:
+              image: grafana/grafana:latest
+              container_name: grafana
+              restart: unless-stopped
+              ports:
+                - "3000:3000"
+              environment:
+                - GF_SECURITY_ADMIN_USER=admin
+                - GF_SECURITY_ADMIN_PASSWORD=admin123
+                - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-worldmap-panel
+              volumes:
+                - grafana_data:/var/lib/grafana
+                - ./grafana/provisioning:/etc/grafana/provisioning
+              depends_on:
+                - influxdb
+              networks:
+                - telemetry
+          
+          volumes:
+            influxdb_data:
+            grafana_data:
+          
+          networks:
+            telemetry:
+              driver: bridge
+        dest: /opt/telemetry-stack/docker-compose.yml
+
+    - name: Create Telegraf configuration for Docker
+      copy:
+        content: |
+          [agent]
+            interval = "10s"
+            round_interval = true
+            metric_batch_size = 1000
+            metric_buffer_limit = 10000
+            flush_interval = "10s"
+            hostname = "telegraf-docker"
+
+          [[outputs.influxdb]]
+            urls = ["http://influxdb:8086"]
+            database = "cisco_telemetry"
+            username = "telegraf"
+            password = "telegraf123"
+
+          # Cisco MDT Input
+          [[inputs.cisco_telemetry_mdt]]
+            transport = "tcp"
+            service_address = ":57344"
+            max_msg_size = 4000000
+
+          # System metrics
+          [[inputs.cpu]]
+          [[inputs.mem]]
+          [[inputs.disk]]
+          [[inputs.net]]
+          [[inputs.docker]]
+            endpoint = "unix:///var/run/docker.sock"
+        dest: /opt/telemetry-stack/telegraf.conf
+
+    - name: Create InfluxDB configuration for Docker
+      copy:
+        content: |
+          [meta]
+            dir = "/var/lib/influxdb/meta"
+
+          [data]
+            dir = "/var/lib/influxdb/data"
+            engine = "tsm1"
+            wal-dir = "/var/lib/influxdb/wal"
+
+          [http]
+            enabled = true
+            bind-address = ":8086"
+            auth-enabled = true
+            log-enabled = true
+
+          [logging]
+            level = "info"
+        dest: /opt/telemetry-stack/influxdb.conf
+
+    - name: Create Grafana provisioning directory
+      file:
+        path: /opt/telemetry-stack/grafana/provisioning/datasources
+        state: directory
+        recurse: yes
+
+    - name: Create Grafana datasource configuration
+      copy:
+        content: |
+          apiVersion: 1
+          
+          datasources:
+            - name: InfluxDB-Cisco
+              type: influxdb
+              access: proxy
+              url: http://influxdb:8086
+              database: cisco_telemetry
+              user: telegraf
+              password: telegraf123
+              isDefault: true
+              editable: true
+        dest: /opt/telemetry-stack/grafana/provisioning/datasources/influxdb.yml
+
+    # Deploy the stack
+    - name: Deploy telemetry stack with Docker Compose
+      docker_compose:
+        project_src: /opt/telemetry-stack
+        state: present
+        pull: yes
+      register: docker_output
+
+    - name: Wait for services to be ready
+      wait_for:
+        port: "{{ item }}"
+        host: localhost
+        delay: 10
+        timeout: 120
+      loop:
+        - 8086  # InfluxDB
+        - 3000  # Grafana
+        - 57344 # Telegraf collector
+
+    - name: Display installation summary
+      debug:
+        msg:
+          - "=== DOCKER TELEMETRY STACK DEPLOYED ==="
+          - "InfluxDB: http://{{ ansible_default_ipv4.address }}:8086"
+          - "Grafana: http://{{ ansible_default_ipv4.address }}:3000"
+          - "  Username: admin"
+          - "  Password: admin123"
+          - "Telemetry Collector: {{ ansible_default_ipv4.address }}:57344"
+          - ""
+          - "Next: Configure Cisco device to send telemetry data"
+          - "Cisco command: telemetry model-driven destination-group DGroup1 address-family ipv4 {{ ansible_default_ipv4.address }} port 57344"
+
+  handlers:
+    - name: restart influxdb
+      systemd:
+        name: influxdb
+        state: restarted
+
+    - name: restart telegraf
+      systemd:
+        name: telegraf
+        state: restarted
+
+    - name: restart grafana
+      systemd:
+        name: grafana-server
+        state: restarted
